@@ -90,7 +90,7 @@ class DataLoader:
         print('_download_url:', download_url)
         save_route = os.path.join(self.DIR, download_url.split('/')[-1])
         if not os.path.exists(save_route):
-            with TqdmCustom(unit='B', unit_scale=True, unit_divisor=4096, miniters=1, desc=download_url) as t:
+            with TqdmCustom(unit='B', unit_scale=True, unit_divisor=8192, miniters=1, desc=download_url) as t:
                 urlretrieve(download_url, save_route, t.update_to)
     
     def download_dataset(self):
@@ -171,7 +171,36 @@ class DataLoader:
         
         return train_dataset, valid_dataset
 
+    def load_test(self, index=0, custom_dataset=False):
+        if index < 0 or index >= len(self.DATASET_SOURCE[self.DATASET]['test_files'])//2:
+            raise ValueError('test file index out of range. value min:0 max:{}'.format(
+                len(self.DATASET_SOURCE[self.DATASET]['test_files'])//2 - 1)
+            )
+        if custom_dataset:
+            print('load test_dataset step.1 - use custom dataset, please implement custom download_dataset function.')
+        else:
+            print('load test_dataset step.1 - download test dataset.')
+            self.download_dataset()
+        
+        print('load test_dataset step.2 - parse dataset.')
+        source_test_data_path, target_test_data_path = self.get_test_data_path(index)
+        source_test_data = self.parse_data_and_save(source_test_data_path)
+        target_test_data = self.parse_data_and_save(target_test_data_path)
+
+        print('load test_dataset step.3 - load bpe vocab.')
+        self.dictionary['source']['token2idx'], self.dictionary['source']['idx2token'] = self.load_bpe_vocab(
+            self.PATHS['source_bpe_prefix'] + self.BPE_VOCAB_SUFFIX
+        )
+        self.dictionary['target']['token2idx'], self.dictionary['target']['idx2token'] = self.load_bpe_vocab(
+            self.PATHS['target_bpe_prefix'] + self.BPE_VOCAB_SUFFIX
+        )
+
+        return source_test_data, target_test_data
     
+    def get_test_data_path(self, index=0):
+        source_test_data_path = os.path.join(self.DIR, self.DATASET_SOURCE[self.DATASET]['test_files'][index*2])
+        target_test_data_path = os.path.join(self.DIR, self.DATASET_SOURCE[self.DATASET]['test_files'][index*2+1])
+        return source_test_data_path, target_test_data_path
 
     def create_dataset(self, source_sequences, target_sequences):
         new_source_sequences, new_target_sequences = [], []
@@ -255,6 +284,23 @@ class DataLoader:
             ]
             sequences.append(sequence)
         return sequences
+    
+    def sequences_to_texts(self, sequences, mode='source'):
+        if mode not in self.MODES: ValueError('not allowed mode.')
+        texts = []
+        for sequence in sequences:
+            if mode == 'source':
+                if self.source_sp is None:
+                    self.source_sp = sentencepiece.SentencePieceProcessor()
+                    self.source_sp.Load(self.PATHS['source_bpe_prefix'] + self.BPE_MODEL_SUFFIX)
+                text = self.source_sp.DecodeIds(sequences)
+            else:
+                if self.target_sp is None:
+                    self.target_sp = sentencepiece.SentencePieceProcessor()
+                    self.target_sp.load(self.PATHS['target_bpe_prefix'] + self.BPE_MODEL_SUFFIX)
+                text = self.target_sp.DecodeIds(sequence)
+            texts.append(text)
+        return texts
 
     def parse_data_and_save(self, path):
         print('load dataset from {}'.format(path))
